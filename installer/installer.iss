@@ -1,7 +1,7 @@
 #define MyAppName "CrispMic"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "CrispMic Open Source"
-#define MyAppURL "https://github.com/your-username/CrispMic"
+#define MyAppURL "https://github.com/XanderBuystPXL/CrispMic"
 #define MyAppExeName "CrispMic.exe"
 
 [Setup]
@@ -15,9 +15,9 @@ AppUpdatesURL={#MyAppURL}
 DefaultDirName={localappdata}\Programs\{#MyAppName}
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=CrispMic-Setup-v{#MyAppVersion}
-SetupIconFile=app.ico
+SetupIconFile=..\src\app.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -30,7 +30,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\src\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
