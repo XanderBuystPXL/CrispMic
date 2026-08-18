@@ -20,13 +20,16 @@ if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path "$root\src\publish\*" -DestinationPath $zipPath -CompressionLevel Optimal
 
 Write-Host "3. Compiling Windows Installer with Inno Setup..." -ForegroundColor Cyan
+$isccCmd = (Get-Command iscc.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
+
 $isccCandidates = @(
-    "C:\Users\xande\AppData\Local\Programs\Inno Setup 6\ISCC.exe",
+    $isccCmd,
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe"
+    "C:\Program Files\Inno Setup 6\ISCC.exe",
+    "C:\Users\xande\AppData\Local\Programs\Inno Setup 6\ISCC.exe"
 )
 
-$isccPath = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+$isccPath = $isccCandidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 
 if ($isccPath) {
     & $isccPath "$root\installer\installer.iss"
