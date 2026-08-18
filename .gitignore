@@ -1,0 +1,20 @@
+## Visual Studio / .NET
+[Bb]in/
+[Oo]bj/
+[Pp]ublish/
+[Dd]ist/
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+build/
+
+# Config files with local paths
+*.local
