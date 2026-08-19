@@ -15,6 +15,47 @@ public class AudioDeviceInfo
     public override string ToString() => Name;
 }
 
+public class StreamingResampler
+{
+    private float _lastSample = 0f;
+    private double _fraction = 0.0;
+
+    public void Reset()
+    {
+        _lastSample = 0f;
+        _fraction = 0.0;
+    }
+
+    public void Process(ReadOnlySpan<float> input, List<float> output, int inSampleRate, int outSampleRate)
+    {
+        if (input.Length == 0) return;
+
+        if (inSampleRate == outSampleRate)
+        {
+            for (int i = 0; i < input.Length; i++) output.Add(input[i]);
+            return;
+        }
+
+        double step = (double)inSampleRate / outSampleRate;
+        int inIndex = 0;
+        int inLength = input.Length;
+
+        while (inIndex < inLength)
+        {
+            while (_fraction < 1.0)
+            {
+                float interpolated = _lastSample + (float)_fraction * (input[inIndex] - _lastSample);
+                output.Add(interpolated);
+                _fraction += step;
+            }
+
+            _fraction -= 1.0;
+            _lastSample = input[inIndex];
+            inIndex++;
+        }
+    }
+}
+
 public class AudioEngine : IDisposable
 {
     private readonly AppConfig _config;
@@ -30,8 +71,10 @@ public class AudioEngine : IDisposable
     private readonly BiquadFilter _midFilter = new();
     private readonly BiquadFilter _trebleFilter = new();
 
+    private readonly StreamingResampler _resampler = new();
     private readonly object _lock = new();
     private readonly List<float> _inputAccumulator = new(2048);
+    private readonly List<float> _rawCaptureMono = new(2048);
 
     private float _gateEnvelope = 1.0f;
     private bool _isMuted = false;
@@ -133,12 +176,13 @@ public class AudioEngine : IDisposable
 
                 var standardFormat = WaveFormat.CreateIeeeFloatWaveFormat(48000, 1);
 
-                // Setup Render
+                // Setup Render with tight low-latency 40ms buffer to prevent latency accumulation
                 _renderBuffer = new BufferedWaveProvider(standardFormat)
                 {
+                    BufferDuration = TimeSpan.FromMilliseconds(40),
                     DiscardOnBufferOverflow = true
                 };
-                _renderOut = new WasapiOut(renderDevice, AudioClientShareMode.Shared, useEventSync: true, 15);
+                _renderOut = new WasapiOut(renderDevice, AudioClientShareMode.Shared, useEventSync: true, 10);
                 _renderOut.Init(_renderBuffer);
                 _renderOut.Play();
 
@@ -150,9 +194,10 @@ public class AudioEngine : IDisposable
                         var monitorDevice = enumerator.GetDevice(_config.MonitorDeviceId);
                         _monitorBuffer = new BufferedWaveProvider(standardFormat)
                         {
+                            BufferDuration = TimeSpan.FromMilliseconds(40),
                             DiscardOnBufferOverflow = true
                         };
-                        _monitorOut = new WasapiOut(monitorDevice, AudioClientShareMode.Shared, useEventSync: true, 15);
+                        _monitorOut = new WasapiOut(monitorDevice, AudioClientShareMode.Shared, useEventSync: true, 10);
                         _monitorOut.Init(_monitorBuffer);
                         _monitorOut.Play();
                     }
@@ -160,6 +205,7 @@ public class AudioEngine : IDisposable
                 }
 
                 // Setup Capture
+                _resampler.Reset();
                 _capture = new WasapiCapture(captureDevice, useEventSync: true, 10);
                 _capture.DataAvailable += OnCaptureDataAvailable;
                 _capture.RecordingStopped += (s, e) => { IsRunning = false; };
@@ -216,6 +262,8 @@ public class AudioEngine : IDisposable
             _rnnoise = null;
 
             _inputAccumulator.Clear();
+            _rawCaptureMono.Clear();
+            _resampler.Reset();
             IsRunning = false;
             CurrentPeak = 0f;
             CurrentVad = 0f;
@@ -229,10 +277,13 @@ public class AudioEngine : IDisposable
         WaveFormat format = _capture.WaveFormat;
         int bytesRecorded = e.BytesRecorded;
         byte[] buffer = e.Buffer;
+        int inSampleRate = format.SampleRate;
 
         lock (_lock)
         {
-            // Convert incoming PCM bytes to mono float samples
+            _rawCaptureMono.Clear();
+
+            // 1. Convert incoming PCM bytes to mono float samples
             if (format.Encoding == WaveFormatEncoding.IeeeFloat)
             {
                 int sampleCount = bytesRecorded / 4;
@@ -240,7 +291,7 @@ public class AudioEngine : IDisposable
                 for (int i = 0; i < sampleCount; i += channels)
                 {
                     float sample = BitConverter.ToSingle(buffer, i * 4);
-                    _inputAccumulator.Add(sample);
+                    _rawCaptureMono.Add(sample);
                 }
             }
             else if (format.BitsPerSample == 16)
@@ -250,7 +301,7 @@ public class AudioEngine : IDisposable
                 for (int i = 0; i < sampleCount; i += channels)
                 {
                     short sampleShort = BitConverter.ToInt16(buffer, i * 2);
-                    _inputAccumulator.Add(sampleShort / 32768.0f);
+                    _rawCaptureMono.Add(sampleShort / 32768.0f);
                 }
             }
             else if (format.BitsPerSample == 24)
@@ -260,14 +311,32 @@ public class AudioEngine : IDisposable
                 for (int i = 0; i < sampleCount; i += channels)
                 {
                     int sampleInt = (buffer[i * 3 + 2] << 24) | (buffer[i * 3 + 1] << 16) | (buffer[i * 3] << 8);
-                    _inputAccumulator.Add(sampleInt / 2147483648.0f);
+                    _rawCaptureMono.Add(sampleInt / 2147483648.0f);
+                }
+            }
+            else if (format.BitsPerSample == 32)
+            {
+                int sampleCount = bytesRecorded / 4;
+                int channels = format.Channels;
+                for (int i = 0; i < sampleCount; i += channels)
+                {
+                    int sampleInt = BitConverter.ToInt32(buffer, i * 4);
+                    _rawCaptureMono.Add(sampleInt / 2147483648.0f);
                 }
             }
 
-            // Process full 480-sample (10ms) frames
-            const int frameSize = RNNoiseProcessor.FrameSize;
-            float maxPeak = 0f;
+            // 2. Continuous Sample Rate Conversion (Handles 44.1kHz, 96kHz, 192kHz -> 48kHz seamlessly)
+            _resampler.Process(_rawCaptureMono.ToArray(), _inputAccumulator, inSampleRate, 48000);
 
+            const int frameSize = RNNoiseProcessor.FrameSize; // 480 samples = 10ms at 48kHz
+
+            // Guard against accumulator backlog (e.g. system lag/sleep)
+            if (_inputAccumulator.Count > frameSize * 4)
+            {
+                _inputAccumulator.RemoveRange(0, _inputAccumulator.Count - (frameSize * 2));
+            }
+
+            float maxPeak = 0f;
             float inputGainFactor = MathF.Pow(10f, _config.InputGainDb / 20f);
             float outputGainFactor = MathF.Pow(10f, _config.OutputGainDb / 20f);
 
@@ -343,10 +412,23 @@ public class AudioEngine : IDisposable
                 // Write to byte buffer
                 Buffer.BlockCopy(frameOut, 0, outBytes, 0, outBytes.Length);
 
-                _renderBuffer?.AddSamples(outBytes, 0, outBytes.Length);
+                // Active Clock-Drift Compensation:
+                // If buffered queue exceeds 25ms of audio, purge excess so render is always strictly real-time (<15ms)
+                if (_renderBuffer != null)
+                {
+                    if (_renderBuffer.BufferedBytes > frameSize * 4 * 2)
+                    {
+                        _renderBuffer.ClearBuffer();
+                    }
+                    _renderBuffer.AddSamples(outBytes, 0, outBytes.Length);
+                }
 
                 if (_config.MonitoringEnabled && _monitorBuffer != null)
                 {
+                    if (_monitorBuffer.BufferedBytes > frameSize * 4 * 2)
+                    {
+                        _monitorBuffer.ClearBuffer();
+                    }
                     _monitorBuffer.AddSamples(outBytes, 0, outBytes.Length);
                 }
             }
