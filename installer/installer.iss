@@ -22,6 +22,9 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
+CloseApplications=yes
+CloseApplicationsFilter=*.exe
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -38,3 +41,13 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// Gracefully close any running CrispMic instance before installing
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill', '/f /im CrispMic.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
