@@ -10,7 +10,7 @@
     <RootNamespace>CrispMic</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <Product>CrispMic</Product>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <Authors>xander</Authors>
     <Description>Ultra-lightweight native audio preamplifier and neural noise suppressor for Windows</Description>
     <NoWarn>$(NoWarn);WFO1000;CS0618</NoWarn>

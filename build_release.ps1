@@ -15,7 +15,7 @@ if (!(Test-Path "$root\dist")) {
 }
 
 Write-Host "2. Creating Portable ZIP..." -ForegroundColor Cyan
-$zipPath = "$root\dist\CrispMic-v1.0.0-Portable.zip"
+$zipPath = "$root\dist\CrispMic-v1.0.1-Portable.zip"
 if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path "$root\src\publish\*" -DestinationPath $zipPath -CompressionLevel Optimal
 

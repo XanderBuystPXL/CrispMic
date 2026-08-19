@@ -1,5 +1,5 @@
 #define MyAppName "CrispMic"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "CrispMic Open Source"
 #define MyAppURL "https://github.com/XanderBuystPXL/CrispMic"
 #define MyAppExeName "CrispMic.exe"
